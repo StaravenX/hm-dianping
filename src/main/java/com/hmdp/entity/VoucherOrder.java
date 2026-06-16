@@ -3,16 +3,17 @@ package com.hmdp.entity;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
-import lombok.Data;
-import lombok.EqualsAndHashCode;
+import lombok.*;
 import lombok.experimental.Accessors;
 
 import java.io.Serializable;
 import java.time.LocalDateTime;
 
+
+
 /**
  * <p>
- * 
+ *
  * </p>
  *
  * @author 虎哥
@@ -22,6 +23,9 @@ import java.time.LocalDateTime;
 @EqualsAndHashCode(callSuper = false)
 @Accessors(chain = true)
 @TableName("tb_voucher_order")
+@NoArgsConstructor
+@AllArgsConstructor
+@Builder
 public class VoucherOrder implements Serializable {
 
     private static final long serialVersionUID = 1L;

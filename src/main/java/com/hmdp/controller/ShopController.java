@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.annotation.Resource;
 
+
 /**
  * <p>
  * 前端控制器
@@ -33,7 +34,11 @@ public class ShopController {
      */
     @GetMapping("/{id}")
     public Result queryShopById(@PathVariable("id") Long id) {
-        return Result.ok(shopService.getById(id));
+        Shop shop = (Shop) shopService.queryById(id);
+        if (shop == null) {
+            throw new RuntimeException("店铺不存在");
+        }
+        return Result.ok(shop);
     }
 
     /**
@@ -57,7 +62,7 @@ public class ShopController {
     @PutMapping
     public Result updateShop(@RequestBody Shop shop) {
         // 写入数据库
-        shopService.updateById(shop);
+        shopService.update(shop);
         return Result.ok();
     }
 
