@@ -11,21 +11,27 @@ import com.hmdp.service.IVoucherOrderService;
 import com.hmdp.utils.RedisIdWorker;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
-import org.springframework.context.annotation.Primary;
+import org.apache.kafka.clients.producer.ProducerRecord;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import javax.annotation.Resource;
 import java.util.Collections;
 
 @Service
 @Slf4j
-@Primary
 public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, VoucherOrder> implements IVoucherOrderService {
 
     private static final DefaultRedisScript<Long> SECKILL_SCRIPT;
+
+    @Resource
+    StringRedisTemplate stringRedisTemplate;
 
     static {
         SECKILL_SCRIPT = new DefaultRedisScript<>();
@@ -33,40 +39,50 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         SECKILL_SCRIPT.setResultType(Long.class);
     }
 
-    private final StringRedisTemplate stringRedisTemplate;
-    private final RabbitTemplate rabbitTemplate;
-    private final ISeckillVoucherService iSeckillVoucherService;
+    @Autowired
+    private KafkaTemplate<String, Object> kafkaTemplate;
+    @Autowired
+    private ISeckillVoucherService iSeckillVoucherService;
+    @Autowired
+    private RedisTemplate<Object, Object> redisTemplate;
 
-    public VoucherOrderServiceImpl(StringRedisTemplate stringRedisTemplate, RabbitTemplate rabbitTemplate, ISeckillVoucherService iSeckillVoucherService) {
-        this.stringRedisTemplate = stringRedisTemplate;
-        this.rabbitTemplate = rabbitTemplate;
-        this.iSeckillVoucherService = iSeckillVoucherService;
-    }
 
     @Override
     public Result seckillVoucher(Long voucherId) {
+        // 执行Lua脚本
         Long userId = UserHolder.getUser().getId();
-        long result = stringRedisTemplate.execute(SECKILL_SCRIPT, Collections.emptyList(), voucherId.toString(), userId.toString());
-        if(result == 1) {
+        long result = stringRedisTemplate.execute(SECKILL_SCRIPT, Collections.emptyList(), voucherId, userId);
+        if (result == 1) {
             return Result.fail("库存不足！");
-        } else if(result == 2) {
-            return Result.fail("同一用户不允许重复下单！");
+        } else if (result == 2) {
+            return Result.fail("请勿重复下单");
         }
-        VoucherOrder build = VoucherOrder.builder().userId(userId).voucherId(voucherId).id(RedisIdWorker.nextId()).build();
-        rabbitTemplate.convertAndSend("seckill.exchange", "", build);
+        // 创建订单
+        VoucherOrder order = new VoucherOrder();
+        Long orderId = RedisIdWorker.nextId();
+        order.setUserId(userId);
+        order.setVoucherId(voucherId);
+        order.setId(orderId);
+        // 发送消息
+        ProducerRecord<String, Object> record = new ProducerRecord<>("seckill.order.topic", order);
+        record.headers().add("messageId", orderId.toString().getBytes());
+        kafkaTemplate.send(record).whenComplete((result1, ex) -> {
+            if(ex == null) {
+                return;
+            }
+            log.error("订单发送失败！优惠券：" + voucherId);
+        });
         return Result.ok();
     }
 
     @Override
-    public void createVoucherOrder(VoucherOrder voucherOrder) {
-        try {
-            save(voucherOrder);
-        } catch (Exception e) {
-            log.info("同一用户不允许重复下单");
-        }
-        boolean b = iSeckillVoucherService.lambdaUpdate().setSql("stock = stock - 1").eq(SeckillVoucher::getVoucherId, voucherOrder.getVoucherId()).gt(SeckillVoucher::getStock, 0).update();
-        if(BooleanUtil.isFalse(b)) {
+    @Transactional
+    public void createVoucherOrder(VoucherOrder voucherOrder){
+        save(voucherOrder);
+        boolean res = iSeckillVoucherService.lambdaUpdate().gt(SeckillVoucher::getStock, 0).setSql("stock = stock - 1").eq(SeckillVoucher::getVoucherId, voucherOrder.getVoucherId()).update();
+        if (BooleanUtil.isFalse(res)) {
             log.info("库存不足");
+            throw new RuntimeException();
         }
     }
 }

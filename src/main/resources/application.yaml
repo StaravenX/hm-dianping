@@ -26,6 +26,14 @@ spring:
     port: 5672
     username: guest
     virtual-host: /
+  Kafka:
+    producer:
+      bootstrap-servers: localhost:9092
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+    consumer:
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
 mybatis-plus:
   type-aliases-package: com.hmdp.entity # 别名扫描包
 logging:
